@@ -1,4 +1,4 @@
-package nsq
+package internal
 
 import (
 	"runtime"
@@ -6,10 +6,6 @@ import (
 
 	"github.com/nsqio/go-nsq"
 )
-
-type NSQMessageHandler interface {
-	HandleMessage(m *nsq.Message) error
-}
 
 type NSQService struct {
 	config             *nsq.Config
@@ -42,7 +38,7 @@ func (s *NSQService) Publish(topic string, message []byte) error {
 	return s.producer.Publish(topic, message)
 }
 
-func (s *NSQService) RegisterHandler(topic string, channel string, handler NSQMessageHandler) error {
+func (s *NSQService) AddHandler(topic string, channel string, handler func(m *nsq.Message) error) error {
 	consumer, err := nsq.NewConsumer(topic, channel, s.config)
 	if err != nil {
 		return err
@@ -54,7 +50,7 @@ func (s *NSQService) RegisterHandler(topic string, channel string, handler NSQMe
 			// In this case, a message with an empty body is simply ignored/discarded.
 			return nil
 		}
-		return handler.HandleMessage(m)
+		return handler(m)
 	}), runtime.NumCPU())
 
 	// Use nsqlookupd to discover nsqd instances.
