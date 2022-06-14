@@ -24,8 +24,8 @@ func (s *QueueService) Publish(topic string, message []byte) error {
 	return s.nsqService.Publish(topic, message)
 }
 
-func (s *QueueService) AddHandler(topic string, channel string, handler func(m *nsq.Message) error) {
-	s.nsqService.AddHandler(topic, channel, handler)
+func (s *QueueService) AddHandler(topic string, channel string, handler func(m *nsq.Message) error) error {
+	return s.nsqService.AddHandler(topic, channel, handler)
 }
 
 func (s *QueueService) Close() {
