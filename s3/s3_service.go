@@ -8,7 +8,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/minio/minio-go/v7/pkg/tags"
-	"github.com/sirupsen/logrus"
 )
 
 type S3Service struct {
@@ -64,6 +63,10 @@ func (s *S3Service) GetObject(path string) (*minio.Object, error) {
 	return s.client.GetObject(context.Background(), s.bucket, path, minio.GetObjectOptions{})
 }
 
+func (s *S3Service) RemoveObject(path string) error {
+	return s.client.RemoveObject(context.Background(), s.bucket, path, minio.RemoveObjectOptions{})
+}
+
 type GetObjectsResult struct {
 	Err  error
 	Path string
@@ -90,41 +93,15 @@ func (s *S3Service) GetObjects(prefix string) <-chan *GetObjectsResult {
 	return ch
 }
 
-func (s *S3Service) ListSubmissionFiles(submissionID string) <-chan *GetObjectsResult {
-	ch := make(chan *GetObjectsResult)
+func (s *S3Service) RemoveObjects(prefix string) error {
+	objects := s.GetObjects(prefix)
 
-	go func() {
-		defer close(ch)
-		for _, path := range []string{"transpilations/", "transpilations-results/"} {
-
-			objects := s.client.ListObjects(context.Background(), s.bucket, minio.ListObjectsOptions{Prefix: path + submissionID, Recursive: true})
-
-			for object := range objects {
-				ch <- &GetObjectsResult{
-					Err:  object.Err,
-					Path: object.Key,
-					Size: object.Size,
-				}
-			}
-		}
-	}()
-
-	return ch
-}
-
-func (s *S3Service) DeleteSubmission(id string) error {
-	logrus.WithField("id", id).Debug("Deleting submission from S3")
-	for _, path := range []string{"transpilations/", "transpilations-results/"} {
-		objects := s.client.ListObjects(context.Background(), s.bucket, minio.ListObjectsOptions{Prefix: path + id, Recursive: true})
-
-		for object := range objects {
-			err := s.client.RemoveObject(context.Background(), s.bucket, object.Key, minio.RemoveObjectOptions{})
-			if err != nil {
-				return err
-			}
+	for object := range objects {
+		if object.Err != nil {
+			return object.Err
 		}
 
-		err := s.client.RemoveObject(context.Background(), s.bucket, path+id, minio.RemoveObjectOptions{})
+		err := s.RemoveObject(object.Path)
 		if err != nil {
 			return err
 		}
@@ -144,7 +121,7 @@ func (s *S3Service) SizeofObjects(prefix string) int64 {
 }
 
 // Set a tag for the objects to be deleted by Lifecycle later on
-func (s *S3Service) ScheduleForDeletion(id string) error {
+func (s *S3Service) ScheduleForDeletion(prefix string) error {
 	tagMap := map[string]string{
 		"to-delete": "true",
 	}
@@ -153,17 +130,10 @@ func (s *S3Service) ScheduleForDeletion(id string) error {
 		log.Fatalln(err)
 	}
 
-	for _, path := range []string{"transpilations/", "transpilations-results/"} {
-		for object := range s.GetObjects(path + id) {
-			logrus.WithFields(logrus.Fields{
-				"path": object.Path,
-				"tags": tags,
-			}).Debug("Setting tags on object")
-
-			err := s.client.PutObjectTagging(context.Background(), s.bucket, object.Path, tags, minio.PutObjectTaggingOptions{})
-			if err != nil {
-				return err
-			}
+	for object := range s.GetObjects(prefix) {
+		err := s.client.PutObjectTagging(context.Background(), s.bucket, object.Path, tags, minio.PutObjectTaggingOptions{})
+		if err != nil {
+			return err
 		}
 	}
 
